@@ -1,6 +1,7 @@
-import { OHLC, CanvasDimensions } from './types';
+import { OHLC, CanvasDimensions, Trade } from './types';
 import { CoordinateManager } from './CoordinateManager';
 import { ReplayController } from './ReplayController';
+import { TradePainter } from '../layers/TradePainter';
 
 /**
  * High-performance Canvas-based chart renderer
@@ -12,6 +13,7 @@ export class Chart {
   private context: CanvasRenderingContext2D;
   private coordinateManager: CoordinateManager;
   private replayController: ReplayController | null = null;
+  private tradePainter: TradePainter | null = null;
   private animationId: number | null = null;
   private isRunning: boolean = false;
   
@@ -357,6 +359,27 @@ export class Chart {
     this.replayController.setOnTickChange(() => {
       this.shouldRedraw = true;
     });
+  }
+
+  /**
+   * Set the trade painter for rendering trades
+   * @param tradePainter TradePainter instance
+   */
+  setTradePainter(tradePainter: TradePainter): void {
+    this.tradePainter = tradePainter;
+    this.shouldRedraw = true;
+  }
+
+  /**
+   * Update trade painter with current trades and price
+   * @param trades Array of trades to render
+   * @param currentPrice Current market price for P&L calculations
+   */
+  updateTrades(trades: Trade[], currentPrice: number): void {
+    if (this.tradePainter) {
+      this.tradePainter.setCurrentPrice(currentPrice);
+      this.tradePainter.draw(trades);
+    }
   }
 
   /**

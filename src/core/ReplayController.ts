@@ -1,4 +1,4 @@
-import { OHLC, ReplayState } from './types';
+import { OHLC, ReplayState, TradeEvent, TradeEventCallback } from './types';
 
 /**
  * Manages the temporal state for market replay functionality
@@ -10,6 +10,7 @@ export class ReplayController {
   private animationFrameId: number | null = null;
   private lastUpdate: number = 0;
   private onTickChange?: (tickIndex: number) => void;
+  private tradeEventCallbacks: TradeEventCallback[] = [];
 
   /**
    * Create a new ReplayController
@@ -224,10 +225,41 @@ export class ReplayController {
   }
 
   /**
+   * Add trade event listener
+   * @param callback Trade event callback function
+   */
+  onTradeEvent(callback: TradeEventCallback): void {
+    this.tradeEventCallbacks.push(callback);
+  }
+
+  /**
+   * Remove trade event listener
+   * @param callback Trade event callback function to remove
+   */
+  offTradeEvent(callback: TradeEventCallback): void {
+    this.tradeEventCallbacks = this.tradeEventCallbacks.filter(cb => cb !== callback);
+  }
+
+  /**
+   * Emit trade event to all registered callbacks
+   * @param event Trade event to emit
+   */
+  emitTradeEvent(event: TradeEvent): void {
+    this.tradeEventCallbacks.forEach(callback => {
+      try {
+        callback(event);
+      } catch (error) {
+        console.error('Error in trade event callback:', error);
+      }
+    });
+  }
+
+  /**
    * Destroy the controller and clean up resources
    */
   destroy(): void {
     this.pause();
     this.onTickChange = undefined;
+    this.tradeEventCallbacks = [];
   }
 }

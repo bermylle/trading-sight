@@ -4,6 +4,7 @@ export { Chart } from './Chart';
 export { CandlePainter } from './CandlePainter';
 export { InteractionManager } from './InteractionManager';
 export { ReplayController } from './ReplayController';
+export { BrokerEngine } from './BrokerEngine';
 export type {
   OHLC,
   CanvasDimensions,
@@ -11,5 +12,10 @@ export type {
   PriceRange,
   ChartState,
   ReplayState,
-  InteractionState
+  InteractionState,
+  Trade,
+  TradeEventType,
+  TradeEvent,
+  TradeEventCallback,
+  BrokerConfig
 } from './types';
