@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Sight - Core Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #00ff00;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .stats {
+            background: #2a2a2a;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .chart-container {
+            position: relative;
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 500px;
+            background: #1e1e1e;
+        }
+        
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        button {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #444;
+        }
+        
+        .legend {
+            margin-top: 10px;
+            font-size: 11px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Trading Sight - Core Charting Engine</h1>
+        
+        <div class="stats" id="stats">
+            FPS: 0 | Zoom: 10.00 | Offset: 0 | Visible: 0 - 0 | Data: 0 candles
+        </div>
+        
+        <div class="chart-container">
+            <canvas id="chartCanvas"></canvas>
+            <div class="controls">
+                <button onclick="resetZoom()">Reset Zoom</button>
+                <button onclick="zoomIn()">Zoom In</button>
+                <button onclick="zoomOut()">Zoom Out</button>
+                <span style="margin-left: 20px;">Scroll to zoom • Click & drag to pan</span>
+            </div>
+        </div>
+        
+        <div class="legend">
+            <p><strong>Architecture:</strong> Pure TypeScript + Canvas 2D API • 60 FPS target • No React in core rendering</p>
+            <p><strong>Performance:</strong> Only processes visible data • Optimized coordinate mapping • Efficient RAF loop</p>
+            <p><strong>Features:</strong> CoordinateManager brain • Chart renderer • CandlePainter proof of concept</p>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import the core modules (this would work in a real build environment)
+        // For demo purposes, we'll simulate the core functionality
+        
+        // Generate sample OHLC data
+        function generateSampleData(count = 2000) {
+            const data = [];
+            let price = 100;
+            
+            for (let i = 0; i < count; i++) {
+                const time = Date.now() - (count - i) * 60000; // 1 minute intervals
+                const volatility = 0.5 + Math.random() * 1.5;
+                
+                const change = (Math.random() - 0.5) * volatility;
+                price += change;
+                
+                const open = price;
+                const close = price + (Math.random() - 0.5) * volatility;
+                const high = Math.max(open, close) + Math.random() * volatility;
+                const low = Math.min(open, close) - Math.random() * volatility;
+                
+                data.push({
+                    time,
+                    open: Math.round(open * 100) / 100,
+                    high: Math.round(high * 100) / 100,
+                    low: Math.round(low * 100) / 100,
+                    close: Math.round(close * 100) / 100
+                });
+            }
+            
+            return data;
+        }
+
+        // Simple coordinate manager implementation for demo
+        class DemoCoordinateManager {
+            constructor(data, dimensions, zoom = 10, offset = 0, priceOffset = 0) {
+                this.data = data;
+                this.state = { zoom, offset, priceOffset, canvasDimensions: dimensions };
+            }
+            
+            getVisibleRange() {
+                const { zoom, offset, canvasDimensions } = this.state;
+                const startIndex = Math.floor(offset / zoom);
+                const endIndex = Math.min(
+                    startIndex + Math.ceil(canvasDimensions.width / zoom) + 1,
+                    this.data.length - 1
+                );
+                return {
+                    startIndex: Math.max(0, startIndex),
+                    endIndex: Math.max(0, Math.min(endIndex, this.data.length - 1))
+                };
+            }
+            
+            getMinMaxPrice() {
+                const { startIndex, endIndex } = this.getVisibleRange();
+                let min = Infinity, max = -Infinity;
+                
+                for (let i = startIndex; i <= endIndex; i++) {
+                    const candle = this.data[i];
+                    if (candle.low < min) min = candle.low;
+                    if (candle.high > max) max = candle.high;
+                }
+                
+                if (min === max) min = max - 1;
+                return { min, max };
+            }
+            
+            priceToY(price) {
+                const { min, max } = this.getMinMaxPrice();
+                const { height } = this.state.canvasDimensions;
+                const priceOffset = this.getPriceOffset();
+                
+                const range = max - min;
+                if (range === 0) return height / 2;
+                
+                // Apply price offset for vertical panning
+                const adjustedPrice = price + (priceOffset * range / height);
+                const normalized = (adjustedPrice - min) / range;
+                return height - (normalized * height);
+            }
+            
+            timeToX(index) {
+                const { zoom, offset } = this.state;
+                return (index * zoom) - offset;
+            }
+            
+            setZoom(zoom) { this.state.zoom = zoom; }
+            setOffset(offset) { this.state.offset = offset; }
+            setPriceOffset(priceOffset) { this.state.priceOffset = priceOffset; }
+            getZoom() { return this.state.zoom; }
+            getOffset() { return this.state.offset; }
+            getPriceOffset() { return this.state.priceOffset || 0; }
+        }
+
+        // Initialize demo
+        const canvas = document.getElementById('chartCanvas');
+        const ctx = canvas.getContext('2d');
+        const data = generateSampleData(2000);
+        const dimensions = { width: canvas.clientWidth, height: canvas.clientHeight };
+        const coordinateManager = new DemoCoordinateManager(data, dimensions, 10, 0);
+        
+        // Enable pixel-perfect rendering
+        ctx.imageSmoothingEnabled = false;
+        ctx.mozImageSmoothingEnabled = false;
+        ctx.webkitImageSmoothingEnabled = false;
+        ctx.msImageSmoothingEnabled = false;
+        
+        let animationId = null;
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let fps = 0;
+        
+        // Handle resize
+        window.addEventListener('resize', () => {
+            dimensions.width = canvas.clientWidth;
+            dimensions.height = canvas.clientHeight;
+            coordinateManager.state.canvasDimensions = dimensions;
+            
+            // Re-apply pixel-perfect settings after resize
+            ctx.imageSmoothingEnabled = false;
+            ctx.mozImageSmoothingEnabled = false;
+            ctx.webkitImageSmoothingEnabled = false;
+            ctx.msImageSmoothingEnabled = false;
+        });
+
+        // Animation loop
+        function animate(timestamp) {
+            if (!lastFrameTime) lastFrameTime = timestamp;
+            
+            frameCount++;
+            if (timestamp - lastFrameTime >= 1000) {
+                fps = frameCount;
+                frameCount = 0;
+                lastFrameTime = timestamp;
+                updateStats();
+            }
+            
+            draw();
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // Drawing functions
+        function draw() {
+            const { width, height } = dimensions;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+            
+            // Draw background
+            ctx.fillStyle = '#1e1e1e';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw grid
+            drawGrid();
+            
+            // Draw candles
+            drawCandles();
+            
+            // Draw FPS
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.fillText(`FPS: ${fps}`, 10, 20);
+        }
+
+        function drawGrid() {
+            const { width, height } = dimensions;
+            const { min, max } = coordinateManager.getMinMaxPrice();
+            
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 4]);
+            
+            // Draw horizontal grid lines
+            const range = max - min;
+            const step = Math.pow(10, Math.floor(Math.log10(range)) - 1);
+            const start = Math.floor(min / step) * step;
+            
+            for (let price = start; price <= max; price += step) {
+                if (price >= min) {
+                    const y = coordinateManager.priceToY(price);
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(width, y);
+                    ctx.stroke();
+                }
+            }
+            
+            ctx.setLineDash([]);
+        }
+
+        function drawCandles() {
+            const { startIndex, endIndex } = coordinateManager.getVisibleRange();
+            
+            for (let i = startIndex; i <= endIndex; i++) {
+                const candle = data[i];
+                if (!candle) continue;
+                
+                const x = coordinateManager.timeToX(i);
+                const openY = coordinateManager.priceToY(candle.open);
+                const closeY = coordinateManager.priceToY(candle.close);
+                const highY = coordinateManager.priceToY(candle.high);
+                const lowY = coordinateManager.priceToY(candle.low);
+                
+                // Draw wick with pixel-perfect coordinates
+                const wickX = Math.round(x);
+                const wickHighY = Math.round(highY);
+                const wickLowY = Math.round(lowY);
+                
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(wickX, wickHighY);
+                ctx.lineTo(wickX, wickLowY);
+                ctx.stroke();
+                
+                // Draw body with pixel-perfect coordinates
+                const bodyX = Math.round(x - 3);
+                const bodyY = Math.round(Math.min(openY, closeY));
+                const bodyHeight = Math.max(Math.abs(Math.round(closeY) - Math.round(openY)), 1);
+                const isBullish = candle.close >= candle.open;
+                
+                ctx.fillStyle = isBullish ? '#00ff00' : '#ff0000';
+                ctx.fillRect(bodyX, bodyY, 6, bodyHeight);
+            }
+        }
+
+        function updateStats() {
+            const { startIndex, endIndex } = coordinateManager.getVisibleRange();
+            const stats = document.getElementById('stats');
+            stats.innerHTML = `
+                FPS: ${fps} | 
+                Zoom: ${coordinateManager.getZoom().toFixed(2)} | 
+                Offset: ${coordinateManager.getOffset().toFixed(0)} | 
+                Visible: ${startIndex} - ${endIndex} | 
+                Data: ${data.length} candles
+            `;
+        }
+
+        // Event handlers
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY;
+            const currentZoom = coordinateManager.getZoom();
+            const newZoom = Math.max(1, Math.min(100, currentZoom + (delta * 0.01)));
+            coordinateManager.setZoom(newZoom);
+            updateStats();
+        }, { passive: false });
+
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaX = e.clientX - lastMouseX;
+                const deltaY = e.clientY - lastMouseY;
+                
+                // Horizontal panning (default)
+                const currentOffset = coordinateManager.getOffset();
+                coordinateManager.setOffset(currentOffset - deltaX);
+                
+                // Vertical panning (Alt key + drag)
+                if (e.altKey) {
+                    const currentPriceOffset = coordinateManager.getPriceOffset();
+                    coordinateManager.setPriceOffset(currentPriceOffset + deltaY);
+                }
+                
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                updateStats();
+            }
+        });
+
+        // Control functions
+        window.resetZoom = () => {
+            coordinateManager.setZoom(10);
+            coordinateManager.setOffset(0);
+            updateStats();
+        };
+
+        window.zoomIn = () => {
+            const currentZoom = coordinateManager.getZoom();
+            coordinateManager.setZoom(currentZoom * 1.2);
+            updateStats();
+        };
+
+        window.zoomOut = () => {
+            const currentZoom = coordinateManager.getZoom();
+            coordinateManager.setZoom(currentZoom / 1.2);
+            updateStats();
+        };
+
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>
