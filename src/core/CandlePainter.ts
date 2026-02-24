@@ -2,12 +2,13 @@ import { OHLC, CanvasDimensions } from './types';
 import { CoordinateManager } from './CoordinateManager';
 
 /**
- * Proof of concept candle painter
- * Demonstrates how to draw basic candlesticks using the CoordinateManager
+ * Advanced candle painter with Fog of War and Ghost Candles support
+ * Renders only revealed candles and shows future candles as ghosts
  */
 export class CandlePainter {
   private coordinateManager: CoordinateManager;
   private context: CanvasRenderingContext2D;
+  private currentTickIndex: number = 0;
 
   /**
    * Create a new CandlePainter
@@ -20,9 +21,14 @@ export class CandlePainter {
   }
 
   /**
-   * Draw all visible candles
+   * Draw all visible candles with Fog of War support
+   * @param currentTickIndex The current replay tick index
    */
-  drawCandles(): void {
+  drawCandles(currentTickIndex?: number): void {
+    if (currentTickIndex !== undefined) {
+      this.currentTickIndex = currentTickIndex;
+    }
+
     const { startIndex, endIndex } = this.coordinateManager.getVisibleRange();
     
     // Clear previous drawings
@@ -30,7 +36,13 @@ export class CandlePainter {
     
     // Draw each visible candle
     for (let i = startIndex; i <= endIndex; i++) {
-      this.drawCandle(i);
+      if (i <= this.currentTickIndex) {
+        // Render normal candle (Fog of War: revealed)
+        this.drawNormalCandle(i);
+      } else {
+        // Render ghost candle (Fog of War: hidden)
+        this.drawGhostCandle(i);
+      }
     }
   }
 
@@ -76,18 +88,82 @@ export class CandlePainter {
    * @param openY Y coordinate of the open price
    * @param closeY Y coordinate of the close price
    * @param candle OHLC data for the candle
+   * @param opacity Opacity level for the candle (0.0 to 1.0)
    */
-  private drawBody(x: number, openY: number, closeY: number, candle: OHLC): void {
+  private drawBody(x: number, openY: number, closeY: number, candle: OHLC, opacity: number = 1.0): void {
     const bodyHeight = Math.abs(closeY - openY);
     const bodyY = Math.min(openY, closeY);
     const isBullish = candle.close >= candle.open;
 
-    // Set fill color based on candle direction
-    this.context.fillStyle = isBullish ? '#00ff00' : '#ff0000';
+    // Set fill color based on candle direction with opacity
+    const baseColor = isBullish ? '#00ff00' : '#ff0000';
+    this.context.fillStyle = this.setOpacity(baseColor, opacity);
 
     // Draw the body rectangle
     // Minimum height of 1 pixel for very small price differences
     this.context.fillRect(x - 3, bodyY, 6, Math.max(bodyHeight, 1));
+  }
+
+  /**
+   * Draw a normal candle (fully revealed)
+   * @param index Data index of the candle to draw
+   */
+  private drawNormalCandle(index: number): void {
+    const candle = this.coordinateManager.getDataAtX(this.coordinateManager.timeToX(index));
+    if (!candle) return;
+
+    const x = this.coordinateManager.timeToX(index);
+    const openY = this.coordinateManager.priceToY(candle.open);
+    const closeY = this.coordinateManager.priceToY(candle.close);
+    const highY = this.coordinateManager.priceToY(candle.high);
+    const lowY = this.coordinateManager.priceToY(candle.low);
+
+    // Draw wick with full opacity
+    this.context.globalAlpha = 1.0;
+    this.drawWick(x, highY, lowY);
+
+    // Draw body with full opacity
+    this.drawBody(x, openY, closeY, candle, 1.0);
+  }
+
+  /**
+   * Draw a ghost candle (hidden/future)
+   * @param index Data index of the candle to draw
+   */
+  private drawGhostCandle(index: number): void {
+    const candle = this.coordinateManager.getDataAtX(this.coordinateManager.timeToX(index));
+    if (!candle) return;
+
+    const x = this.coordinateManager.timeToX(index);
+    const openY = this.coordinateManager.priceToY(candle.open);
+    const closeY = this.coordinateManager.priceToY(candle.close);
+    const highY = this.coordinateManager.priceToY(candle.high);
+    const lowY = this.coordinateManager.priceToY(candle.low);
+
+    // Draw wick with low opacity
+    this.context.globalAlpha = 0.1;
+    this.drawWick(x, highY, lowY);
+
+    // Draw body with low opacity
+    this.drawBody(x, openY, closeY, candle, 0.1);
+
+    // Reset global alpha
+    this.context.globalAlpha = 1.0;
+  }
+
+  /**
+   * Set opacity for a color
+   * @param color Color in hex format (#rrggbb)
+   * @param opacity Opacity level (0.0 to 1.0)
+   * @returns Color with opacity applied
+   */
+  private setOpacity(color: string, opacity: number): string {
+    // Convert hex to rgba
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
   }
 
   /**

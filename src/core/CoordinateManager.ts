@@ -103,7 +103,8 @@ export class CoordinateManager {
   getMinMaxPrice(): PriceRange {
     const { startIndex, endIndex } = this.getVisibleRange();
     
-    if (startIndex >= this.data.length || endIndex < 0 || startIndex > endIndex) {
+    // Handle edge cases early
+    if (startIndex >= this.data.length || endIndex < 0 || startIndex > endIndex || this.data.length === 0) {
       return { min: 0, max: 100 }; // Fallback range
     }
 
@@ -113,13 +114,18 @@ export class CoordinateManager {
     // Only iterate through visible data for performance
     for (let i = startIndex; i <= endIndex; i++) {
       const candle = this.data[i];
+      if (!candle) continue;
+      
       if (candle.low < min) min = candle.low;
       if (candle.high > max) max = candle.high;
     }
 
-    // Handle edge case where min equals max
-    if (min === max) {
-      min = max - 1;
+    // Handle edge case where min equals max or no valid data found
+    if (min === Infinity || max === -Infinity || min === max) {
+      // Use a reasonable fallback range
+      const fallbackMin = Math.min(0, min === Infinity ? 0 : min);
+      const fallbackMax = Math.max(100, max === -Infinity ? 100 : max);
+      return { min: fallbackMin, max: fallbackMax };
     }
 
     return { min, max };
@@ -138,7 +144,9 @@ export class CoordinateManager {
     const range = max - min;
     if (range === 0) return height / 2; // Handle zero range
     
-    const normalized = (price - min) / range;
+    // Clamp price to valid range to prevent NaN
+    const clampedPrice = Math.max(min, Math.min(max, price));
+    const normalized = (clampedPrice - min) / range;
     return height - (normalized * height);
   }
 

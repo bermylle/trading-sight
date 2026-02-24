@@ -57,3 +57,31 @@ export interface ChartState {
   /** Canvas dimensions */
   canvasDimensions: CanvasDimensions;
 }
+
+/**
+ * Replay state for market replay functionality
+ */
+export interface ReplayState {
+  /** Current tick index (playhead position) */
+  currentTickIndex: number;
+  /** Playback speed in milliseconds between updates */
+  playbackSpeed: number;
+  /** Whether playback is paused */
+  isPaused: boolean;
+}
+
+/**
+ * Interaction state for mouse events
+ */
+export interface InteractionState {
+  /** Whether panning is active */
+  isPanning: boolean;
+  /** Whether zooming is active */
+  isZooming: boolean;
+  /** Last mouse X position */
+  lastMouseX: number;
+  /** Last mouse Y position */
+  lastMouseY: number;
+  /** X coordinate of zoom anchor point */
+  zoomAnchorX: number;
+}

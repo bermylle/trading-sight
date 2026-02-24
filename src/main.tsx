@@ -34,45 +34,129 @@ const generateSampleData = (count: number = 1000): OHLC[] => {
 };
 
 const App: React.FC = () => {
-  const [data] = React.useState<OHLC[]>(generateSampleData(2000));
+  const data = React.useMemo(() => generateSampleData(2000), []);
   const [zoom, setZoom] = React.useState(10);
   const [offset, setOffset] = React.useState(0);
 
-  const handleZoom = (newZoom: number) => {
+  const handleZoom = React.useCallback((newZoom: number) => {
     setZoom(newZoom);
-  };
+  }, []);
 
-  const handlePan = (newOffset: number) => {
+  const handlePan = React.useCallback((newOffset: number) => {
     setOffset(newOffset);
-  };
+  }, []);
 
-  return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>Trading Sight - Charting Engine Demo</h1>
-      <div style={{ marginBottom: '10px', fontSize: '14px', color: '#666' }}>
-        <p>Controls: Scroll to zoom, Click and drag to pan</p>
-        <p>Current Zoom: {zoom.toFixed(2)} | Offset: {offset.toFixed(0)}</p>
-      </div>
-      
-      <TradingSight
-        data={data}
-        width={1000}
-        height={500}
-        initialZoom={10}
-        initialOffset={0}
-        onZoom={handleZoom}
-        onPan={handlePan}
-      />
-      
-      <div style={{ marginTop: '20px', fontSize: '12px', color: '#888' }}>
-        <p>Performance: Canvas-based rendering with 60 FPS target</p>
-        <p>Data Points: {data.length} OHLC candles</p>
-        <p>Architecture: Pure TypeScript + Canvas 2D API (no React in core rendering)</p>
-      </div>
-    </div>
+  const handleReplayStateChange = React.useCallback((state: { currentTickIndex: number; playbackSpeed: number; isPaused: boolean }) => {
+    // Handle replay state changes
+    console.log('Replay state changed:', state);
+  }, []);
+
+  return React.createElement('div', 
+    { style: { padding: '20px', fontFamily: 'Arial, sans-serif', backgroundColor: '#1a1a1a', minHeight: '100vh' } },
+    React.createElement('h1', 
+      { style: { color: '#00ff00', textAlign: 'center', marginBottom: '10px' } },
+      'Trading Sight - Charting Engine Demo'
+    ),
+    React.createElement('div', 
+      { style: { marginBottom: '10px', fontSize: '14px', color: '#666', textAlign: 'center' } },
+      React.createElement('p', null, 'Controls: Scroll to zoom, Click and drag to pan, Alt + drag for price panning'),
+      React.createElement('p', null, `Current Zoom: ${zoom.toFixed(2)} | Offset: ${offset.toFixed(0)}`)
+    ),
+    React.createElement(TradingSight, {
+      data,
+      width: 1000,
+      height: 500,
+      initialZoom: 10,
+      initialOffset: 0,
+      enableReplay: true,
+      initialReplaySpeed: 1000,
+      onZoom: handleZoom,
+      onPan: handlePan,
+      onReplayStateChange: handleReplayStateChange
+    }),
+    React.createElement('div', 
+      { style: { marginTop: '20px', fontSize: '12px', color: '#888', textAlign: 'center' } },
+      React.createElement('p', null, 'Performance: Canvas-based rendering with 60 FPS target'),
+      React.createElement('p', null, `Data Points: ${data.length} OHLC candles`),
+      React.createElement('p', null, 'Architecture: Pure TypeScript + Canvas 2D API (no React in core rendering)'),
+      React.createElement('p', null, 'Features: Zoom-to-cursor, Fog of War, Ghost Candles, Dirty Flag Optimization')
+    )
   );
 };
 
-// Render the app
-const root = ReactDOM.createRoot(document.getElementById('root')!);
-root.render(<App />);
+// Error boundary for better error handling
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error; errorInfo?: React.ErrorInfo }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): { hasError: boolean; error: Error } {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    this.setState({ error, errorInfo });
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return React.createElement('div', 
+        { style: { padding: '20px', fontFamily: 'Arial, sans-serif', textAlign: 'center' } },
+        React.createElement('h2', { style: { color: '#ff0000' } }, 'Something went wrong'),
+        React.createElement('p', null, this.state.error?.message),
+        React.createElement('button', 
+          { 
+            onClick: () => window.location.reload(),
+            style: {
+              padding: '10px 20px',
+              backgroundColor: '#00ff00',
+              color: '#000',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }
+          },
+          'Reload Page'
+        )
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Render the app with error boundary
+try {
+  const rootElement = document.getElementById('root');
+  if (!rootElement) {
+    throw new Error('Root element not found');
+  }
+
+  const root = ReactDOM.createRoot(rootElement);
+  root.render(
+    React.createElement(ErrorBoundary, null,
+      React.createElement(App, null)
+    )
+  );
+} catch (error) {
+  console.error('Failed to render app:', error);
+  
+  // Fallback UI
+  const fallbackElement = document.createElement('div');
+  fallbackElement.innerHTML = `
+    <div style="padding: 20px; font-family: Arial, sans-serif; text-align: center;">
+      <h2 style="color: #ff0000;">Application Error</h2>
+      <p>Failed to load the Trading Sight application.</p>
+      <p>Error: ${error instanceof Error ? error.message : 'Unknown error'}</p>
+      <button onclick="window.location.reload()" style="padding: 10px 20px; background: #00ff00; color: #000; border: none; border-radius: 4px; cursor: pointer;">
+        Reload Page
+      </button>
+    </div>
+  `;
+  document.body.appendChild(fallbackElement);
+}

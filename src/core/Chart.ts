@@ -1,14 +1,17 @@
 import { OHLC, CanvasDimensions } from './types';
 import { CoordinateManager } from './CoordinateManager';
+import { ReplayController } from './ReplayController';
 
 /**
  * High-performance Canvas-based chart renderer
  * Manages the rendering loop and coordinates with CoordinateManager
+ * Implements dirty flag pattern for optimal performance
  */
 export class Chart {
   private canvas: HTMLCanvasElement;
   private context: CanvasRenderingContext2D;
   private coordinateManager: CoordinateManager;
+  private replayController: ReplayController | null = null;
   private animationId: number | null = null;
   private isRunning: boolean = false;
   
@@ -16,6 +19,13 @@ export class Chart {
   private lastFrameTime: number = 0;
   private frameCount: number = 0;
   private fps: number = 0;
+  
+  // Dirty flag optimization
+  private lastOffset: number = 0;
+  private lastZoom: number = 0;
+  private lastPriceOffset: number = 0;
+  private lastTickIndex: number = -1;
+  private shouldRedraw: boolean = true;
 
   /**
    * Create a new Chart instance
@@ -49,9 +59,6 @@ export class Chart {
     this.context.imageSmoothingEnabled = false;
     this.context.textBaseline = 'middle';
     
-    // Pixel-perfect rendering settings
-    this.context.imageSmoothingEnabled = false;
-    
     // Additional browser-specific settings for pixel-perfect rendering
     if ((this.context as any).mozImageSmoothingEnabled !== undefined) {
       (this.context as any).mozImageSmoothingEnabled = false;
@@ -67,8 +74,13 @@ export class Chart {
   /**
    * Set up resize observer for responsive behavior
    */
+  private resizeObserver: ResizeObserver | null = null;
+
+  /**
+   * Set up resize observer for responsive behavior
+   */
   private setupResizeObserver(): void {
-    const resizeObserver = new ResizeObserver((entries) => {
+    this.resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.target === this.canvas) {
           this.resizeCanvas();
@@ -76,7 +88,7 @@ export class Chart {
       }
     });
     
-    resizeObserver.observe(this.canvas);
+    this.resizeObserver.observe(this.canvas);
   }
 
   /**
@@ -106,7 +118,7 @@ export class Chart {
     
     this.isRunning = true;
     this.lastFrameTime = performance.now();
-    this.animate();
+    this.animationId = requestAnimationFrame(this.animate.bind(this));
   }
 
   /**
@@ -121,23 +133,43 @@ export class Chart {
   }
 
   /**
-   * Main animation loop
+   * Main animation loop with dirty flag optimization
    */
-  private animate = (timestamp: number): void => {
+  private animate(timestamp: number): void {
     if (!this.isRunning) return;
 
-    // Calculate FPS
-    this.updateFPS(timestamp);
+    // Check if we need to redraw
+    if (this.shouldRedraw) {
+      // Calculate FPS
+      this.updateFPS(timestamp);
 
-    // Clear canvas
-    this.clear();
+      // Clear canvas
+      this.clear();
 
-    // Draw chart
-    this.draw();
+      // Draw chart
+      this.draw();
+      
+      // Update dirty flags
+      this.updateDirtyFlags();
+    }
 
     // Schedule next frame
-    this.animationId = requestAnimationFrame(this.animate);
-  };
+    this.animationId = requestAnimationFrame(this.animate.bind(this));
+  }
+
+  /**
+   * Update dirty flags to track changes
+   */
+  private updateDirtyFlags(): void {
+    const currentState = this.coordinateManager.getState();
+    const currentTickIndex = this.replayController ? this.replayController.getCurrentTickIndex() : 0;
+    
+    this.lastOffset = currentState.offset;
+    this.lastZoom = currentState.zoom;
+    this.lastPriceOffset = currentState.priceOffset;
+    this.lastTickIndex = currentTickIndex;
+    this.shouldRedraw = false;
+  }
 
   /**
    * Update FPS counter
@@ -238,41 +270,54 @@ export class Chart {
   }
 
   /**
-   * Draw candlesticks
+   * Draw candlesticks with optimized rendering
    */
   private drawCandles(): void {
     const { startIndex, endIndex } = this.coordinateManager.getVisibleRange();
     
+    // Pre-calculate common values for performance
+    const { min: priceMin, max: priceMax } = this.coordinateManager.getMinMaxPrice();
+    const { height: canvasHeight } = this.coordinateManager.getState().canvasDimensions;
+    
     for (let i = startIndex; i <= endIndex; i++) {
+      // Direct array access is faster than coordinate conversion
       const candle = this.coordinateManager.getDataAtX(this.coordinateManager.timeToX(i));
       if (!candle) continue;
       
+      // Calculate coordinates once
       const x = this.coordinateManager.timeToX(i);
-      const openY = this.coordinateManager.priceToY(candle.open);
-      const closeY = this.coordinateManager.priceToY(candle.close);
-      const highY = this.coordinateManager.priceToY(candle.high);
-      const lowY = this.coordinateManager.priceToY(candle.low);
+      const xRounded = Math.round(x);
+      
+      // Optimized price-to-Y conversion
+      const range = priceMax - priceMin;
+      const normalizedOpen = (candle.open - priceMin) / range;
+      const normalizedClose = (candle.close - priceMin) / range;
+      const normalizedHigh = (candle.high - priceMin) / range;
+      const normalizedLow = (candle.low - priceMin) / range;
+      
+      const openY = canvasHeight - (normalizedOpen * canvasHeight);
+      const closeY = canvasHeight - (normalizedClose * canvasHeight);
+      const highY = canvasHeight - (normalizedHigh * canvasHeight);
+      const lowY = canvasHeight - (normalizedLow * canvasHeight);
       
       // Draw wick with pixel-perfect coordinates
-      const wickX = Math.round(x);
       const wickHighY = Math.round(highY);
       const wickLowY = Math.round(lowY);
       
       this.context.strokeStyle = '#fff';
       this.context.lineWidth = 1;
       this.context.beginPath();
-      this.context.moveTo(wickX, wickHighY);
-      this.context.lineTo(wickX, wickLowY);
+      this.context.moveTo(xRounded, wickHighY);
+      this.context.lineTo(xRounded, wickLowY);
       this.context.stroke();
       
       // Draw body with pixel-perfect coordinates
-      const bodyX = Math.round(x - 3);
       const bodyY = Math.round(Math.min(openY, closeY));
       const bodyHeight = Math.max(Math.abs(Math.round(closeY) - Math.round(openY)), 1);
       const isBullish = candle.close >= candle.open;
       
       this.context.fillStyle = isBullish ? '#00ff00' : '#ff0000';
-      this.context.fillRect(bodyX, bodyY, 6, bodyHeight);
+      this.context.fillRect(xRounded - 3, bodyY, 6, bodyHeight);
     }
   }
 
@@ -305,10 +350,21 @@ export class Chart {
   }
 
   /**
+   * Set the replay controller for integration
+   */
+  setReplayController(replayController: ReplayController): void {
+    this.replayController = replayController;
+    this.replayController.setOnTickChange(() => {
+      this.shouldRedraw = true;
+    });
+  }
+
+  /**
    * Update data and trigger re-render
    */
   setData(data: OHLC[]): void {
     this.coordinateManager.setData(data);
+    this.shouldRedraw = true;
   }
 
   /**
@@ -316,6 +372,7 @@ export class Chart {
    */
   setZoom(zoom: number): void {
     this.coordinateManager.setZoom(zoom);
+    this.shouldRedraw = true;
   }
 
   /**
@@ -323,6 +380,7 @@ export class Chart {
    */
   setOffset(offset: number): void {
     this.coordinateManager.setOffset(offset);
+    this.shouldRedraw = true;
   }
 
   /**
@@ -330,6 +388,7 @@ export class Chart {
    */
   setPriceOffset(priceOffset: number): void {
     this.coordinateManager.setPriceOffset(priceOffset);
+    this.shouldRedraw = true;
   }
 
   /**
@@ -344,6 +403,15 @@ export class Chart {
    */
   getOffset(): number {
     return this.coordinateManager.getState().offset;
+  }
+
+  /**
+   * Get the index of the candle at a specific X coordinate
+   * @param x X coordinate in pixels
+   * @returns Data index or -1 if not found
+   */
+  getIndexAtX(x: number): number {
+    return this.coordinateManager.getIndexAtX(x);
   }
 
   /**
@@ -365,6 +433,14 @@ export class Chart {
    */
   destroy(): void {
     this.stop();
+    
+    // Clean up resize observer to prevent memory leaks
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+    
+    // Reset canvas dimensions
     this.canvas.width = 0;
     this.canvas.height = 0;
   }

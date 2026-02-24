@@ -4,3 +4,7 @@ export * from './react';
 
 // Re-export the main React component as default
 export { default as TradingSight } from './react/TradingSight';
+
+// Export core classes for advanced usage
+export { InteractionManager } from './core/InteractionManager';
+export { ReplayController } from './core/ReplayController';

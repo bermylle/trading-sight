@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { OHLC } from '../core/types';
 import { Chart } from '../core/Chart';
+import { InteractionManager } from '../core/InteractionManager';
+import { ReplayController } from '../core/ReplayController';
 
 /**
  * Props for the TradingSight React component
@@ -20,6 +22,12 @@ export interface TradingSightProps {
   initialZoom?: number;
   /** Initial horizontal offset */
   initialOffset?: number;
+  /** Enable replay functionality */
+  enableReplay?: boolean;
+  /** Initial replay speed in milliseconds */
+  initialReplaySpeed?: number;
+  /** Callback for replay state changes */
+  onReplayStateChange?: (state: { currentTickIndex: number; playbackSpeed: number; isPaused: boolean }) => void;
 }
 
 /**
@@ -33,7 +41,10 @@ export const TradingSight: React.FC<TradingSightProps> = ({
   onZoom,
   onPan,
   initialZoom = 10,
-  initialOffset = 0
+  initialOffset = 0,
+  enableReplay = false,
+  initialReplaySpeed = 1000,
+  onReplayStateChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<Chart | null>(null);
